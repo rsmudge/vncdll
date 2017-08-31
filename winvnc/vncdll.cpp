@@ -118,6 +118,8 @@ DWORD vncdll_run( AGENT_CTX * lpAgentContext )
 	return 0;
 }
 
+char directives[32] = "VNC AAAABBBBCCCC";
+
 /*
  * The real entrypoint for this app.
  */
@@ -134,8 +136,8 @@ VOID vncdll_main( char * cpCommandLine )
 	lsocket = socket(AF_INET, SOCK_STREAM, 0);
 
 	sock.sin_family = AF_INET;
-	sock.sin_addr.s_addr = inet_addr("0.0.0.0");
-	sock.sin_port = htons(4444);
+	sock.sin_addr.s_addr = inet_addr("127.0.0.1");	/* we're a localhost only VNC server */
+	sock.sin_port = htons(atoi(directives));	/* grab the port off of the CLI */
 
 	bind(lsocket, (sockaddr *)&sock, sizeof(sock));
 	listen(lsocket, 0);
@@ -152,7 +154,7 @@ VOID vncdll_main( char * cpCommandLine )
 
 	/* clean up, when we're done */
 	closesocket(my_socket);
-	ExitProcess( dwResult );
+	ExitThread( dwResult );
 }
 
 /*
