@@ -125,7 +125,6 @@ char directives[32] = "VNC AAAABBBBCCCC";
  */
 VOID vncdll_main( char * cpCommandLine )
 {
-	DWORD dwResult;
 	AGENT_CTX context = {0};
 	SOCKET lsocket;
 	SOCKET my_socket;
@@ -150,11 +149,12 @@ VOID vncdll_main( char * cpCommandLine )
 	context.bInit       = TRUE;
 
 	/* kick things off */
-	dwResult = vncdll_run( &context );
+	if (my_socket != INVALID_SOCKET)
+		vncdll_run( &context );
 
 	/* clean up, when we're done */
 	closesocket(my_socket);
-	ExitThread( dwResult );
+	ExitThread( 0 );
 }
 
 /*
