@@ -57,28 +57,8 @@ ConsoleSessionId::ConsoleSessionId() {
 }
 
 bool inConsoleSession() {
-  ConsoleSessionId console;
-  return console.id == mySessionId.id;
+  return true;
 }
 
 void setConsoleSession(DWORD sessionId) {
-#ifdef RFB_HAVE_WINSTATION_CONNECT
-  if (!_WinStationConnect.isValid()) {
-    return;
-  }
-  if (sessionId == -1)
-    sessionId = mySessionId.id;
-
-  // Try to reconnect our session to the console
-  ConsoleSessionId console;
-  if (!(*_WinStationConnect)(0, sessionId, console.id, L"", 0)) {
-    return;
-  }
-
-  // Lock the newly connected session, for security
-  if (_LockWorkStation.isValid())
-    (*_LockWorkStation)();
-#else
-
-#endif
 }
