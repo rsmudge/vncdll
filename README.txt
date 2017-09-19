@@ -32,11 +32,13 @@ See LICENSE.txt for more information
 These changes:
 
 	Copyright (C) 2017 Strategic Cyber LLC
+	https://github.com/rsmudge/vncdll
 
 Rapid7's Changes (Metasploit Framework):
 
 	Copyright (C) 2006-2010, Rapid7, Inc
-
+	https://github.com/rapid7/metasploit-framework/tree/master/external/source/vncdll
+	
 TightVNC 1.3.10 (see winvnc\README.txt):
 
 	Copyright (C) 1999 AT&T Laboratories Cambridge.
